@@ -40,6 +40,11 @@
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/api/heleket/create-invoice/route.js"
+    ],
+    "/api/heleket/check-payment/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/heleket/check-payment/route.js"
     ]
   }
 }
