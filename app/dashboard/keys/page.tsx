@@ -73,12 +73,15 @@ export default function KeysPage() {
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    const currentUser = getCurrentUser()
-    if (currentUser) {
-      setUser(currentUser)
-      const userSpecificData = getUserData(currentUser.id)
-      setUserData(userSpecificData)
+    const loadUserData = async () => {
+      const currentUser = getCurrentUser()
+      if (currentUser) {
+        setUser(currentUser)
+        const userSpecificData = await getUserData(currentUser.id)
+        setUserData(userSpecificData)
+      }
     }
+    loadUserData()
   }, [])
 
   const fetchKeys = async () => {

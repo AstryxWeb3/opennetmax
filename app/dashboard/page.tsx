@@ -13,12 +13,15 @@ export default function DashboardPage() {
   const [userData, setUserData] = useState<UserData | null>(null)
 
   useEffect(() => {
-    const currentUser = getCurrentUser()
-    if (currentUser) {
-      setUser(currentUser)
-      const userSpecificData = getUserData(currentUser.id)
-      setUserData(userSpecificData)
+    const loadUserData = async () => {
+      const currentUser = getCurrentUser()
+      if (currentUser) {
+        setUser(currentUser)
+        const userSpecificData = await getUserData(currentUser.id)
+        setUserData(userSpecificData)
+      }
     }
+    loadUserData()
   }, [])
 
   const formatDate = (dateString: string) => {
@@ -48,7 +51,7 @@ export default function DashboardPage() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-mono font-bold text-green-400 mb-2">Dashboard</h1>
-        <p className="text-green-300/80">Welcome back, {user?.username}</p>
+        <p className="text-green-300/80">Welcome back, {user?.accessCode}</p>
       </div>
 
       {/* Subscription Status */}

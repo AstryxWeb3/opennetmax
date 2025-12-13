@@ -1,12 +1,13 @@
+import { supabase } from './supabase'
+
 export interface User {
   id: string
-  accessCode: string // Replaced username with accessCode
+  accessCode: string
   createdAt: string
 }
 
 export interface UserData {
   user: User
-  codeHash: string // Replaced passwordHash with codeHash
   subscription?: {
     plan: string
     expiresAt: string
@@ -16,6 +17,7 @@ export interface UserData {
     id: string
     type: string
     config: string
+    location: string
     createdAt: string
   }>
 }
@@ -30,7 +32,6 @@ export function sanitizeInput(input: string): string {
 export function validateAccessCode(code: string): { valid: boolean; error?: string } {
   const sanitized = code.trim().toUpperCase()
 
-  // Check format: XXXX-XXXX-XXXX-XXXX (16 chars + 3 hyphens)
   if (sanitized.length !== 19) {
     return { valid: false, error: "Access code must be 16 characters in format XXXX-XXXX-XXXX-XXXX" }
   }
@@ -42,109 +43,12 @@ export function validateAccessCode(code: string): { valid: boolean; error?: stri
   return { valid: true }
 }
 
-function getUsersDatabase(): Record<string, UserData> {
-  if (typeof window === "undefined") return {}
-
-  const usersStr = localStorage.getItem("opennet_users_db")
-  if (!usersStr) return {}
-
-  try {
-    return JSON.parse(usersStr)
-  } catch {
-    return {}
-  }
-}
-
-function saveUsersDatabase(users: Record<string, UserData>) {
-  if (typeof window !== "undefined") {
-    localStorage.setItem("opennet_users_db", JSON.stringify(users))
-  }
-}
-
-export function checkAccessCodeExists(code: string): boolean {
-  const users = getUsersDatabase()
-  const normalizedCode = code.toUpperCase()
-  return Object.values(users).some((userData) => userData.user.accessCode === normalizedCode)
-}
-
 async function hashAccessCode(code: string): Promise<string> {
   const encoder = new TextEncoder()
   const data = encoder.encode(code.toUpperCase() + "opennet_salt_2024")
   const hashBuffer = await crypto.subtle.digest("SHA-256", data)
   const hashArray = Array.from(new Uint8Array(hashBuffer))
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
-}
-
-async function verifyAccessCode(code: string, hash: string): Promise<boolean> {
-  const codeHash = await hashAccessCode(code)
-  return codeHash === hash
-}
-
-export async function createUser(): Promise<{ success: boolean; error?: string; user?: User; accessCode?: string }> {
-  let accessCode = generateAccessCode()
-  let attempts = 0
-
-  // Ensure unique code (very unlikely to collide, but just in case)
-  while (checkAccessCodeExists(accessCode) && attempts < 10) {
-    accessCode = generateAccessCode()
-    attempts++
-  }
-
-  if (attempts >= 10) {
-    return { success: false, error: "Failed to generate unique access code. Please try again." }
-  }
-
-  const users = getUsersDatabase()
-  const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-  const codeHash = await hashAccessCode(accessCode)
-
-  const newUser: User = {
-    id: userId,
-    accessCode: accessCode,
-    createdAt: new Date().toISOString(),
-  }
-
-  const trialExpiresAt = new Date()
-  trialExpiresAt.setDate(trialExpiresAt.getDate() + 3) // Add 3 days
-
-  const userData: UserData = {
-    user: newUser,
-    codeHash,
-    subscription: {
-      plan: "3-day trial",
-      expiresAt: trialExpiresAt.toISOString(),
-      isActive: true,
-    },
-  }
-
-  users[userId] = userData
-  saveUsersDatabase(users)
-
-  return { success: true, user: newUser, accessCode }
-}
-
-export async function authenticateUser(accessCode: string): Promise<{ success: boolean; error?: string; user?: User }> {
-  const validation = validateAccessCode(accessCode)
-  if (!validation.valid) {
-    return { success: false, error: validation.error }
-  }
-
-  const normalizedCode = accessCode.toUpperCase()
-  const users = getUsersDatabase()
-
-  const userData = Object.values(users).find((userData) => userData.user.accessCode === normalizedCode)
-
-  if (!userData) {
-    return { success: false, error: "Invalid access code" }
-  }
-
-  // Verify the code against stored hash
-  const isValidCode = await verifyAccessCode(normalizedCode, userData.codeHash)
-  if (!isValidCode) {
-    return { success: false, error: "Invalid access code" }
-  }
-
-  return { success: true, user: userData.user }
 }
 
 export function generateAccessCode(): string {
@@ -160,6 +64,110 @@ export function generateAccessCode(): string {
   }
 
   return segments.join("-")
+}
+
+export async function createUser(): Promise<{ success: boolean; error?: string; user?: User; accessCode?: string }> {
+  try {
+    let accessCode = generateAccessCode()
+    let attempts = 0
+
+    while (attempts < 10) {
+      const { data: existingUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('access_code', accessCode)
+        .maybeSingle()
+
+      if (!existingUser) break
+
+      accessCode = generateAccessCode()
+      attempts++
+    }
+
+    if (attempts >= 10) {
+      return { success: false, error: "Failed to generate unique access code. Please try again." }
+    }
+
+    const codeHash = await hashAccessCode(accessCode)
+
+    const { data: newUser, error: userError } = await supabase
+      .from('users')
+      .insert({
+        access_code: accessCode,
+        access_code_hash: codeHash,
+      })
+      .select()
+      .single()
+
+    if (userError) {
+      console.error('Error creating user:', userError)
+      return { success: false, error: "Failed to create user" }
+    }
+
+    const trialExpiresAt = new Date()
+    trialExpiresAt.setDate(trialExpiresAt.getDate() + 3)
+
+    const { error: subError } = await supabase
+      .from('subscriptions')
+      .insert({
+        user_id: newUser.id,
+        plan: '3-day trial',
+        expires_at: trialExpiresAt.toISOString(),
+        is_active: true,
+      })
+
+    if (subError) {
+      console.error('Error creating subscription:', subError)
+    }
+
+    const user: User = {
+      id: newUser.id,
+      accessCode: newUser.access_code,
+      createdAt: newUser.created_at,
+    }
+
+    return { success: true, user, accessCode }
+  } catch (error) {
+    console.error('Error in createUser:', error)
+    return { success: false, error: "An unexpected error occurred" }
+  }
+}
+
+export async function authenticateUser(accessCode: string): Promise<{ success: boolean; error?: string; user?: User }> {
+  try {
+    const validation = validateAccessCode(accessCode)
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
+
+    const normalizedCode = accessCode.toUpperCase()
+
+    const { data: userData, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('access_code', normalizedCode)
+      .maybeSingle()
+
+    if (error || !userData) {
+      return { success: false, error: "Invalid access code" }
+    }
+
+    const codeHash = await hashAccessCode(normalizedCode)
+    if (codeHash !== userData.access_code_hash) {
+      return { success: false, error: "Invalid access code" }
+    }
+
+    const user: User = {
+      id: userData.id,
+      accessCode: userData.access_code,
+      createdAt: userData.created_at,
+    }
+
+    return { success: true, user }
+  } catch (error) {
+    console.error('Error in authenticateUser:', error)
+    return { success: false, error: "An unexpected error occurred" }
+  }
 }
 
 export function getCurrentUser(): User | null {
@@ -181,16 +189,74 @@ export function setCurrentUser(user: User) {
   }
 }
 
-export function getUserData(userId: string): UserData | null {
-  const users = getUsersDatabase()
-  return users[userId] || null
+export async function getUserData(userId: string): Promise<UserData | null> {
+  try {
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (userError || !userData) return null
+
+    const { data: subscription } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const { data: keys } = await supabase
+      .from('vpn_keys')
+      .select('*')
+      .eq('user_id', userId)
+
+    const user: User = {
+      id: userData.id,
+      accessCode: userData.access_code,
+      createdAt: userData.created_at,
+    }
+
+    const result: UserData = {
+      user,
+    }
+
+    if (subscription) {
+      result.subscription = {
+        plan: subscription.plan,
+        expiresAt: subscription.expires_at,
+        isActive: subscription.is_active && new Date(subscription.expires_at) > new Date(),
+      }
+    }
+
+    if (keys) {
+      result.keys = keys.map((key) => ({
+        id: key.id,
+        type: key.key_type,
+        config: key.config,
+        location: key.location,
+        createdAt: key.created_at,
+      }))
+    }
+
+    return result
+  } catch (error) {
+    console.error('Error in getUserData:', error)
+    return null
+  }
 }
 
-export function updateUserData(userId: string, updates: Partial<UserData>) {
-  const users = getUsersDatabase()
-  if (users[userId]) {
-    users[userId] = { ...users[userId], ...updates }
-    saveUsersDatabase(users)
+export async function updateUserData(userId: string, updates: Partial<UserData>) {
+  if (updates.subscription) {
+    await supabase
+      .from('subscriptions')
+      .update({
+        plan: updates.subscription.plan,
+        expires_at: updates.subscription.expiresAt,
+        is_active: updates.subscription.isActive,
+      })
+      .eq('user_id', userId)
   }
 }
 

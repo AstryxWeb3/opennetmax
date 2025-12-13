@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { supabase } from "@/lib/supabase"
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,31 +10,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "user_id is required" }, { status: 400 })
     }
 
-    console.log("[v0] API Route: Fetching keys for user:", user_id)
+    const { data: keys, error } = await supabase
+      .from('vpn_keys')
+      .select('*')
+      .eq('user_id', user_id)
 
-    // Make the request to the external API from the server side
-    const response = await fetch("https://api.opennetvpn.com/keys", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ user_id }),
-    })
-
-    console.log("[v0] API Route: External API response status:", response.status)
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error("[v0] API Route: External API error:", errorText)
-      return NextResponse.json({ error: "Failed to fetch keys from external API" }, { status: response.status })
+    if (error) {
+      console.error('Error fetching keys:', error)
+      return NextResponse.json({ error: "Failed to fetch keys" }, { status: 500 })
     }
 
-    const data = await response.json()
-    console.log("[v0] API Route: Received keys count:", Array.isArray(data) ? data.length : 0)
+    const formattedKeys = (keys || []).map(key => key.config)
 
-    return NextResponse.json(data)
+    return NextResponse.json(formattedKeys)
   } catch (error) {
-    console.error("[v0] API Route: Error:", error)
+    console.error('Error in keys API:', error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
