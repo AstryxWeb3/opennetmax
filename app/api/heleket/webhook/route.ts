@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
+import { createClient } from "@supabase/supabase-js"
 
 export async function POST(request: NextRequest) {
   try {
@@ -53,13 +54,56 @@ export async function POST(request: NextRequest) {
     if (body.status === "paid" || body.status === "paid_over") {
       console.log("[v0] Payment confirmed for user:", user_id)
 
-      // TODO: Update database with subscription activation
-      // For now, we just log the successful payment
-      // In production, you would:
-      // 1. Update user subscription in database
-      // 2. Set expiration date based on period
-      // 3. Generate VPN keys if needed
-      // 4. Send confirmation email
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        console.error("[v0] Missing Supabase credentials")
+        return NextResponse.json({ error: "Database not configured" }, { status: 500 })
+      }
+
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      )
+
+      // Calculate expiration date based on period
+      const now = new Date()
+      let expiresAt = new Date(now)
+      let planName = "1 Month"
+
+      switch (period) {
+        case 1:
+          expiresAt.setMonth(now.getMonth() + 1)
+          planName = "1 Month"
+          break
+        case 6:
+          expiresAt.setMonth(now.getMonth() + 6)
+          planName = "6 Months"
+          break
+        case 12:
+          expiresAt.setMonth(now.getMonth() + 12)
+          planName = "12 Months"
+          break
+        default:
+          expiresAt.setMonth(now.getMonth() + 1)
+      }
+
+      // Create or update subscription
+      const { data: subscription, error: subError } = await supabase
+        .from("subscriptions")
+        .insert({
+          user_id: user_id,
+          plan: planName,
+          expires_at: expiresAt.toISOString(),
+          is_active: true,
+        })
+        .select()
+        .single()
+
+      if (subError) {
+        console.error("[v0] Error creating subscription:", subError)
+        return NextResponse.json({ error: "Failed to activate subscription" }, { status: 500 })
+      }
+
+      console.log("[v0] Subscription activated:", subscription.id)
     } else if (body.status === "cancel" || body.status === "fail") {
       console.log("[v0] Payment cancelled or failed:", body.order_id)
     }
