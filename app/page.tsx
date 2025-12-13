@@ -257,7 +257,7 @@ export default function HomePage() {
                 <div className="flex justify-center animate-fade-in-right">
                   <div className="flex justify-center">
                     <img
-                      src={activeTab === "vpn" ? "/images/vpn-desktop.svg" : "/images/stealth-proxy.svg"}
+                      src={activeTab === "vpn" ? "/images/design-mode/vpn.svg" : "/images/design-mode/proxy.svg"}
                       alt={activeTab === "vpn" ? "VPN Desktop Illustration" : "Stealth Proxy Illustration"}
                       className="w-full h-auto transition-all duration-500 hover:scale-105"
                     />
@@ -382,7 +382,7 @@ export default function HomePage() {
             <Card
               className="bg-slate-900/30 border-slate-700/30 p-8 md:p-12 text-center relative overflow-hidden transition-all duration-500 hover:bg-slate-900/50 hover:scale-105 hover:shadow-lg hover:shadow-green-500/20"
               style={{
-                backgroundImage: "url('/images/homepage.png')",
+                backgroundImage: "url('/images/design-mode/homepage.png')",
                 backgroundSize: "cover",
                 backgroundPosition: "center",
                 backgroundRepeat: "no-repeat",
